@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # MySQL Database
@@ -7,7 +7,7 @@ services:
     container_name: genysis_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Hruthik@08}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-genesys}
     ports:
       - "3307:3306"
@@ -32,7 +32,7 @@ services:
       - PORT=3000
       - DB_HOST=mysql
       - DB_USER=root
-      - DB_PASSWORD=${MYSQL_ROOT_PASSWORD:-Hruthik@08}
+      - DB_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - DB_NAME=${MYSQL_DATABASE:-genesys}
       - REDIS_HOST=redis
     depends_on:

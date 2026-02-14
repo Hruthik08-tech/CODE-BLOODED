@@ -1,2 +1,13 @@
+# Dependencies
+node_modules/
+
+# Environment variables
 .env
-.node_modules/
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Uploaded files
+organisation_images/
