@@ -1,0 +1,210 @@
+/* Global Leaflet Popup Overrides */
+.leaflet-popup-content-wrapper {
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 0;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+}
+
+.leaflet-popup-content {
+    margin: 0 !important;
+    width: auto !important;
+    line-height: 1.3;
+}
+
+.leaflet-popup-content p {
+    margin: 3px;
+}
+
+.leaflet-popup-tip {
+    background: #ffffff;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+/* Style the default Leaflet close button */
+.leaflet-container a.leaflet-popup-close-button {
+    color: #EA7317; /* Orange from palette */
+    font-size: 18px;
+    top: 6px;
+    right: 6px;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    font-weight: 300; 
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+    color: #d66410;
+    background-color: rgba(234, 115, 23, 0.1);
+}
+
+/* Custom Component container */
+.custom-popup-content {
+    font-family: var(--font-sans);
+    width: 260px;
+    padding: 12px;
+    background: #ffffff;
+    color: #333;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Header Section */
+.popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-right: 14px; /* Space for close button */
+}
+
+.org-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.org-name {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 900;
+    color: #2364AA; /* Blue from palette */
+    line-height: 1.1;
+    font-family: var(--font-serif);
+}
+
+.org-mail {
+    margin: 0;
+    font-size: 15px;
+    color: #666;
+    font-weight: 400;
+}
+
+.more-details {
+    font-size: 12px;
+    font-weight: 700;
+    color: #EA7317; /* Orange from palette */
+    text-decoration: none;
+    margin-top: 2px;
+    display: inline-flex;
+    align-items: center;
+    transition: gap 0.2s;
+    padding-left: 3px;
+}
+
+.more-details:hover {
+    text-decoration: none;
+    gap: 4px;
+}
+
+/* Contact Section */
+.contact-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-top: -2px; /* Pull up closer to header */
+}
+
+.contact-name {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: #333;
+    font-family: var(--font-serif);
+}
+
+.contact-no {
+    margin: 0;
+    font-size: 12px;
+    color: #555;
+    line-height: 1.2;
+}
+
+/* Item Details Card */
+.item-details-card {
+    background: #73BFB8; /* Teal from palette */
+    background: linear-gradient(135deg, #73BFB8 0%, #5ba8a1 100%);
+    padding: 10px;
+    border-radius: 6px;
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    box-shadow: 0 2px 8px rgba(94, 169, 162, 0.25);
+    position: relative;
+    overflow: hidden;
+}
+
+/* Subtle decoration circle on card */
+.item-details-card::after {
+    content: '';
+    position: absolute;
+    top: -15px;
+    right: -15px;
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+}
+
+.item-name {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: capitalize;
+    line-height: 1.1;
+}
+
+.item-category {
+    margin: 1px 0;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.95;
+    font-weight: 700;
+}
+
+.item-price {
+    margin-top: 4px;
+    font-size: 15px;
+    font-weight: 700;
+    background: rgba(255,255,255,0.25);
+    padding: 3px 6px;
+    border-radius: 4px;
+    align-self: flex-start;
+}
+
+/* Send Request Button */
+.send-request-btn {
+    width: 100%;
+    padding: 8px 0;
+    border: none;
+    border-radius: 6px;
+    background: #2364AA; /* Blue from palette */
+    color: #ffffff;
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(35, 100, 170, 0.2);
+    margin-top: 2px;
+}
+
+.send-request-btn:hover {
+    background: #1c528f;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(35, 100, 170, 0.3);
+}
+
+.send-request-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(35, 100, 170, 0.2);
+}

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: genysis_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Hruthik@08}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-genesys}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: genysis_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  # Backend Service
+  backend:
+    build:
+      context: ./backend
+    container_name: genysis_backend
+    restart: always
+    environment:
+      - PORT=3000
+      - DB_HOST=mysql
+      - DB_USER=root
+      - DB_PASSWORD=${MYSQL_ROOT_PASSWORD:-Hruthik@08}
+      - DB_NAME=${MYSQL_DATABASE:-genesys}
+      - REDIS_HOST=redis
+    depends_on:
+      - mysql
+      - redis
+    ports:
+      - "3000:3000"
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+    container_name: genysis_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
