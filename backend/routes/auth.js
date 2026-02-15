@@ -25,6 +25,7 @@ router.post('/register', async (req, res) => {
       postal_code,
       latitude,
       longitude,
+      description,
     } = req.body;
 
     // validate required fields
@@ -55,12 +56,12 @@ router.post('/register', async (req, res) => {
       `INSERT INTO organisation
          (org_name, email, password_hash, phone_number,
           address, city, state, country, postal_code,
-          latitude, longitude, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          latitude, longitude, description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         org_name, email, password_hash, phone_number,
         address, city, state, country, postal_code,
-        latitude, longitude,
+        latitude, longitude, description || null,
       ],
     );
 

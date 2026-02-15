@@ -1,5 +1,7 @@
+# syntax=docker/dockerfile:1
 # ──────────────────────────────────────────────────────────────
 #  GENYSIS  —  Matching Worker (Python) Dockerfile
+#  (Lightweight Version)
 # ──────────────────────────────────────────────────────────────
 FROM python:3.10-slim
 
@@ -10,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy requirements first for layer caching
+# Copy requirements
 COPY requirements.txt .
 
 # Install dependencies

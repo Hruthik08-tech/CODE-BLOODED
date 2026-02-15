@@ -2,177 +2,137 @@
 Main Algorithm 
 Semantic Search Module for Waste Exchange Matching
 
-This module uses sentence transformers to understand semantic similarity
-between item names, so "rice" can match "basmati rice", "jasmine rice", etc.
+This module uses External APIs (HuggingFace or OpenAI) or Fuzzy Matching 
+to understand semantic similarity.
 """
 
-from sentence_transformers import SentenceTransformer
+import requests
 import numpy as np
-from typing import List, Tuple
-import os
+import time
+from typing import List, Tuple, Optional
+from functools import lru_cache
+from config import get_settings
+
+# Global settings
+settings = get_settings()
 
 class SemanticMatcher:
     """
-    Handles semantic matching using sentence embeddings.
-    Uses a pre-trained model to understand meaning beyond exact text matching.
+    Handles semantic matching using API-based embeddings or lightweight fallback.
     """
     
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
-        """
-        Initialize the semantic matcher.
+    def __init__(self):
+        self.provider = settings.SEMANTIC_PROVIDER
+        print(f"Initializing SemanticMatcher with provider: {self.provider}")
         
-        Args:
-            model_name: Name of the sentence-transformers model to use.
-                       'all-MiniLM-L6-v2' is fast and works well for short texts.
-        """
-        print(f"Loading semantic search model: {model_name}")
-        self.model = SentenceTransformer(model_name)
-        print("✓ Semantic search model loaded successfully")
-    
+    @lru_cache(maxsize=1000)
     def get_embedding(self, text: str) -> np.ndarray:
         """
-        Convert text to a semantic embedding vector.
-        
-        Args:
-            text: The text to embed
-        
-        Returns:
-            Numpy array representing the text's meaning
+        Get embedding for text from configured API.
+        Cached to reduce API calls.
         """
-        if not text or not text.strip():
-            # Return zero vector for empty text
-            return np.zeros(self.model.get_sentence_embedding_dimension())
-        
-        # Normalize text
+        if not text:
+            return np.zeros(384) # Default size for MiniLM
+            
         text = text.lower().strip()
         
-        # Get embedding
-        embedding = self.model.encode(text, convert_to_numpy=True)
-        return embedding
-    
+        try:
+            if self.provider == "openai":
+                return self._get_openai_embedding(text)
+            elif self.provider == "huggingface":
+                return self._get_hf_embedding(text)
+            else:
+                # Fuzzy only / Fallback
+                return np.zeros(384)
+        except Exception as e:
+            print(f"Error fetching embedding ({self.provider}): {e}")
+            return np.zeros(384)
+
+    def _get_hf_embedding(self, text: str) -> np.ndarray:
+        """Fetch embedding from Hugging Face Inference API"""
+        api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{settings.HF_MODEL}"
+        headers = {}
+        if settings.HF_API_KEY:
+            headers["Authorization"] = f"Bearer {settings.HF_API_KEY}"
+            
+        # Retry logic
+        for _ in range(3):
+            response = requests.post(api_url, headers=headers, json={"inputs": text, "options": {"wait_for_model": True}})
+            if response.status_code == 200:
+                data = response.json()
+                # HF returns list of floats (embedding) directly or list of list (if batch)
+                if isinstance(data, list):
+                    # Check if it's a list of floats or list of list
+                    if data and isinstance(data[0], list):
+                         return np.array(data[0]) 
+                    return np.array(data)
+            elif response.status_code == 503:
+                # Model loading
+                time.sleep(2)
+                continue
+            else:
+                print(f"HF API Error {response.status_code}: {response.text}")
+                break
+                
+        raise Exception("Failed to get HF embedding")
+
+    def _get_openai_embedding(self, text: str) -> np.ndarray:
+        """Fetch embedding from OpenAI API"""
+        if not settings.OPENAI_API_KEY:
+             raise Exception("OPENAI_API_KEY not set")
+             
+        url = "https://api.openai.com/v1/embeddings"
+        headers = {
+            "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "input": text,
+            "model": settings.OPENAI_MODEL
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            res_json = response.json()
+            vec = res_json['data'][0]['embedding']
+            return np.array(vec)
+        else:
+             raise Exception(f"OpenAI API Error: {response.text}")
+
     def cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
-        """
-        Calculate cosine similarity between two vectors.
-        
-        Args:
-            vec1: First vector
-            vec2: Second vector
-        
-        Returns:
-            Similarity score between 0 and 1 (1 = identical meaning)
-        """
-        # Avoid division by zero
+        """Calculate cosine similarity between two vectors."""
+        # If vectors are zero (failed embedding), return 0
+        if np.all(vec1 == 0) or np.all(vec2 == 0):
+            return 0.0
+            
         norm1 = np.linalg.norm(vec1)
         norm2 = np.linalg.norm(vec2)
         
         if norm1 == 0 or norm2 == 0:
             return 0.0
         
-        # Calculate cosine similarity
-        similarity = np.dot(vec1, vec2) / (norm1 * norm2)
-        
-        # Clip to [0, 1] range
-        similarity = max(0.0, min(1.0, similarity))
-        
-        return float(similarity)
+        return float(np.dot(vec1, vec2) / (norm1 * norm2))
     
     def calculate_similarity(self, text1: str, text2: str) -> float:
-        """
-        Calculate semantic similarity between two texts.
+        """Calculate semantic similarity between two texts."""
+        if self.provider == "fuzzy_only":
+            return 0.0
+            
+        vec1 = self.get_embedding(text1)
+        vec2 = self.get_embedding(text2)
         
-        This understands that:
-        - "rice" is similar to "basmati rice"
-        - "wood chips" is similar to "wood sawdust"
-        - "organic waste" is similar to "food waste"
-        
-        Args:
-            text1: First text
-            text2: Second text
-        
-        Returns:
-            Similarity score between 0 and 1
-        """
-        # Get embeddings
-        emb1 = self.get_embedding(text1)
-        emb2 = self.get_embedding(text2)
-        
-        # Calculate similarity
-        similarity = self.cosine_similarity(emb1, emb2)
-        
-        return similarity
-    
-    def batch_similarity(
-        self, 
-        query: str, 
-        candidates: List[str]
-    ) -> List[Tuple[str, float]]:
-        """
-        Calculate similarity between query and multiple candidates efficiently.
-        
-        Args:
-            query: The search query
-            candidates: List of candidate texts to match against
-        
-        Returns:
-            List of (candidate, similarity_score) tuples, sorted by score
-        """
-        if not candidates:
-            return []
-        
-        # Get query embedding
-        query_emb = self.get_embedding(query)
-        
-        # Get all candidate embeddings at once (more efficient)
-        candidate_embs = self.model.encode(
-            [c.lower().strip() for c in candidates],
-            convert_to_numpy=True,
-            show_progress_bar=False
-        )
-        
-        # Calculate similarities
-        results = []
-        for candidate, candidate_emb in zip(candidates, candidate_embs):
-            similarity = self.cosine_similarity(query_emb, candidate_emb)
-            results.append((candidate, similarity))
-        
-        # Sort by similarity (highest first)
-        results.sort(key=lambda x: x[1], reverse=True)
-        
-        return results
+        return self.cosine_similarity(vec1, vec2)
 
-
-# Global instance (lazy loaded)
+# Global instance
 _semantic_matcher = None
 
-
 def get_semantic_matcher() -> SemanticMatcher:
-    """
-    Get or create the global semantic matcher instance.
-    
-    The model is loaded only once and reused for efficiency.
-    """
     global _semantic_matcher
-    
     if _semantic_matcher is None:
         _semantic_matcher = SemanticMatcher()
-    
     return _semantic_matcher
 
-
 def calculate_semantic_similarity(text1: str, text2: str) -> float:
-    """
-    Convenience function to calculate semantic similarity.
-    
-    Example:
-        >>> similarity = calculate_semantic_similarity("rice", "basmati rice")
-        >>> print(similarity)  # ~0.85
-    
-    Args:
-        text1: First text
-        text2: Second text
-    
-    Returns:
-        Similarity score between 0 and 1
-    """
+    """Convenience function."""
     matcher = get_semantic_matcher()
     return matcher.calculate_similarity(text1, text2)

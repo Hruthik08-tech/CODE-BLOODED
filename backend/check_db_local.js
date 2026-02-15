@@ -4,8 +4,8 @@ async function check() {
     const config = {
         host: '127.0.0.1',
         user: 'root',
-        password: 'Hruthik@08',
-        database: 'genesys'
+        password: 'rootpassword',
+        database: 'waste_exchange'
     };
     
     try {

@@ -9,7 +9,13 @@ const { connectRedis } = require('./connections/redis');
 const authRoutes = require('./routes/auth');
 const supplyRoutes = require('./routes/supply');
 const activityDetailsRoutes = require('./routes/dashboard_routes/activityDetails');
+const demandRoutes = require('./routes/demand');
 const categoriesRoutes = require('./routes/categories');
+const requestsRoutes = require('./routes/requests');
+const roomsRoutes = require('./routes/rooms');
+const dealsRoutes = require('./routes/deals');
+const notificationsRoutes = require('./routes/notifications');
+const matchesRoutes = require('./routes/matches');
 const authenticateToken = require('./middleware/authenticateToken');
 
 const app = express();
@@ -31,13 +37,22 @@ app.get('/api/health', async (_req, res) => {
 // auth routes (public)
 app.use('/api/auth', authRoutes);
 
+// FR-30: Public deal verification (no auth needed for QR scanning)
+app.get('/api/deals/verify/:token', dealsRoutes);
+
 // protected route guard
 // all routes registered after this line require a valid JWT.
 // add future protected routes below this middleware.
 app.use('/api', authenticateToken);
 app.use('/api/supply', supplyRoutes);
+app.use('/api/demand', demandRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/activity-details', activityDetailsRoutes);
+app.use('/api/requests', requestsRoutes);
+app.use('/api/rooms', roomsRoutes);
+app.use('/api/deals', dealsRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/matches', matchesRoutes);
 
 // 404 fallback
 app.use((_req, res) => {

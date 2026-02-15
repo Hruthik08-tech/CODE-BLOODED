@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ──────────────────────────────────────────────────────────────
 #  GENYSIS  —  Node.js API Server Dockerfile
 # ──────────────────────────────────────────────────────────────
@@ -8,8 +9,9 @@ WORKDIR /app
 # Copy package files first for layer caching
 COPY package*.json ./
 
-# Install production dependencies
-RUN npm ci --omit=dev
+# Install production dependencies with cache mount
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
 
 # Copy application source
 COPY . .

@@ -1,113 +1,104 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import './Verify.css';
 
-const Verify = () => {
-    const [searchParams] = useSearchParams();
-    const dealId = searchParams.get('deal') || '';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
-    const [status, setStatus] = useState('loading'); // loading | success | error | notfound
-    const [dealData, setDealData] = useState(null);
+const Verify = () => {
+    const { token } = useParams();
+    const [verifyResult, setVerifyResult] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
-        if (!dealId) {
-            setStatus('notfound');
-            return;
+        if (token) {
+            verifyDeal();
         }
-        // Simulate verification API call
-        const timer = setTimeout(() => {
-            // Mock: if deal ID starts with "DEAL-", it's valid
-            if (dealId.startsWith('DEAL-')) {
-                setDealData({
-                    id: dealId,
-                    itemName: 'Emergency Medical Kits',
-                    partnerOrg: 'Global Aid Foundation',
-                    quantity: 200,
-                    agreedPrice: 140.00,
-                    totalValue: 28000.00,
-                    deliveryDate: '2024-03-15',
-                    status: 'verified',
-                });
-                setStatus('success');
+    }, [token]);
+
+    const verifyDeal = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const response = await fetch(`${API_BASE}/deals/verify/${token}`);
+            const data = await response.json();
+
+            if (response.ok && data.verified) {
+                setVerifyResult(data);
             } else {
-                setStatus('error');
+                setError(data.error || 'Verification failed.');
             }
-        }, 2000);
-        return () => clearTimeout(timer);
-    }, [dealId]);
+        } catch (err) {
+            console.error('Verification error:', err);
+            setError('Network error. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const formatDate = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
 
     return (
         <div className="verify-page">
             <div className="verify-card">
-                {status === 'loading' && (
+                <div className="verify-logo">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <h1>GENYSIS Verification</h1>
+                </div>
+
+                {isLoading ? (
                     <div className="verify-loading">
                         <div className="verify-spinner" />
-                        <h3>Verifying Deal...</h3>
-                        <p>Checking deal #{dealId} against the blockchain</p>
+                        <p>Verifying deal...</p>
                     </div>
-                )}
-
-                {status === 'success' && dealData && (
+                ) : error ? (
+                    <div className="verify-error">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                        <h2>Verification Failed</h2>
+                        <p>{error}</p>
+                    </div>
+                ) : verifyResult ? (
                     <div className="verify-success">
-                        <div className="verify-success-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                        </div>
-                        <h2 className="verify-success-title">Deal Verified Successfully</h2>
-                        <p className="verify-success-desc">This deal has been verified and is authentic.</p>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        <h2>Deal Verified ✓</h2>
+                        <p className="verify-subtitle">This is an authentic GENYSIS platform deal.</p>
 
-                        <div className="verify-deal-details">
-                            <div className="verify-detail">
-                                <span className="verify-detail-label">Deal ID</span>
-                                <span className="verify-detail-value">{dealData.id}</span>
+                        <div className="verify-details">
+                            <div className="vd-row">
+                                <span className="vd-label">Deal ID</span>
+                                <span className="vd-value">DEAL-{verifyResult.deal.deal_id}</span>
                             </div>
-                            <div className="verify-detail">
-                                <span className="verify-detail-label">Item</span>
-                                <span className="verify-detail-value">{dealData.itemName}</span>
+                            <div className="vd-row">
+                                <span className="vd-label">Supply</span>
+                                <span className="vd-value">{verifyResult.deal.supply_name || 'N/A'}</span>
                             </div>
-                            <div className="verify-detail">
-                                <span className="verify-detail-label">Partner</span>
-                                <span className="verify-detail-value">{dealData.partnerOrg}</span>
+                            <div className="vd-row">
+                                <span className="vd-label">Demand</span>
+                                <span className="vd-value">{verifyResult.deal.demand_name || 'N/A'}</span>
                             </div>
-                            <div className="verify-detail">
-                                <span className="verify-detail-label">Quantity</span>
-                                <span className="verify-detail-value">{dealData.quantity} units</span>
+                            <div className="vd-row">
+                                <span className="vd-label">Supply Org</span>
+                                <span className="vd-value">{verifyResult.deal.supply_org}</span>
                             </div>
-                            <div className="verify-detail">
-                                <span className="verify-detail-label">Total Value</span>
-                                <span className="verify-detail-value highlight">${dealData.totalValue.toLocaleString()}</span>
+                            <div className="vd-row">
+                                <span className="vd-label">Demand Org</span>
+                                <span className="vd-value">{verifyResult.deal.demand_org}</span>
                             </div>
-                            <div className="verify-detail">
-                                <span className="verify-detail-label">Delivery By</span>
-                                <span className="verify-detail-value">{dealData.deliveryDate}</span>
+                            <div className="vd-row">
+                                <span className="vd-label">Status</span>
+                                <span className="vd-value vd-status">{verifyResult.deal.status}</span>
                             </div>
-                        </div>
-
-                        <div className="verify-stamp">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                            <span>Verified by GENYSIS Platform</span>
+                            <div className="vd-row">
+                                <span className="vd-label">Created</span>
+                                <span className="vd-value">{formatDate(verifyResult.deal.created_at)}</span>
+                            </div>
                         </div>
                     </div>
-                )}
-
-                {status === 'error' && (
-                    <div className="verify-error">
-                        <div className="verify-error-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                        </div>
-                        <h2 className="verify-error-title">Verification Failed</h2>
-                        <p className="verify-error-desc">The deal ID "{dealId}" could not be verified. It may be invalid or the deal may no longer exist.</p>
-                    </div>
-                )}
-
-                {status === 'notfound' && (
-                    <div className="verify-error">
-                        <div className="verify-error-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                        </div>
-                        <h2 className="verify-error-title">No Deal ID Provided</h2>
-                        <p className="verify-error-desc">Please scan a valid QR code or use a deal verification link.</p>
-                    </div>
-                )}
+                ) : null}
             </div>
         </div>
     );

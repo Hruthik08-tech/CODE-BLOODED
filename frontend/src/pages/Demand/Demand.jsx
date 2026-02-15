@@ -1,69 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../../utils/api';
 import './Demand.css';
 
 const Demand = () => {
     const navigate = useNavigate();
+    const [demands, setDemands] = useState([]);
+    const [categories, setCategories] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const [demands, setDemands] = useState([
-        {
-            uuid: 'DEM-3821-A91',
-            name: 'Emergency Response Kit Request',
-            category: 'Healthcare',
-            status: 'active',
-            maxPrice: 150.00,
-            currency: 'USD',
-            quantity: 200,
-            quantityUnit: 'kits',
-            requiredBy: '2024-03-15',
-            deliveryLocation: 'Mumbai, India',
-            description: 'Complete emergency response kits including first aid, masks, and sanitisers.'
-        },
-        {
-            uuid: 'DEM-5542-B23',
-            name: 'Portable Solar Panels',
-            category: 'Energy',
-            status: 'pending',
-            maxPrice: 85.00,
-            currency: 'USD',
-            quantity: 50,
-            quantityUnit: 'units',
-            requiredBy: '2024-02-28',
-            deliveryLocation: 'Chennai, India',
-            description: 'Foldable solar panels for disaster relief camps.'
-        },
-        {
-            uuid: 'DEM-7890-C45',
-            name: 'Water Purification Tablets',
-            category: 'Sanitation',
-            status: 'completed',
-            maxPrice: 0.50,
-            currency: 'USD',
-            quantity: 10000,
-            quantityUnit: 'pieces',
-            requiredBy: '2024-01-20',
-            deliveryLocation: 'Delhi, India',
-            description: 'Chlorine-based water purification tablets for clean drinking water.'
-        },
-        {
-            uuid: 'DEM-1234-D67',
-            name: 'Emergency Tents (Family Size)',
-            category: 'Shelter',
-            status: 'active',
-            maxPrice: 120.00,
-            currency: 'USD',
-            quantity: 100,
-            quantityUnit: 'units',
-            requiredBy: '2024-04-01',
-            deliveryLocation: 'Bangalore, India',
-            description: 'Family-sized tents for displaced populations.'
-        },
-    ]);
-
+    // Filter and Sort States
     const [searchQuery, setSearchQuery] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
     const [filterCategory, setFilterCategory] = useState('all');
-    const [sortBy, setSortBy] = useState('date');
+    const [sortBy, setSortBy] = useState('date'); // date, price, status
 
     const [formData, setFormData] = useState({
         name: '',
@@ -74,59 +25,110 @@ const Demand = () => {
         quantityUnit: '',
         requiredBy: '',
         deliveryLocation: '',
+        searchRadius: 50,
         description: '',
     });
+
+    // Fetch demands from API on mount
+    useEffect(() => {
+        fetchDemands();
+        fetchCategories();
+    }, []);
+
+    const fetchCategories = async () => {
+        try {
+            const data = await api.get('/categories');
+            if (Array.isArray(data)) {
+                setCategories(data.map(c => c.category_name));
+            }
+        } catch (err) {
+            console.error('Failed to fetch categories:', err);
+        }
+    };
+
+    const fetchDemands = async () => {
+        setIsLoading(true);
+        try {
+            const data = await api.get('/demand');
+            setDemands(data.map(d => ({
+                demandId: d.demand_id,
+                uuid: `DEM-${d.demand_id}`,
+                name: d.item_name,
+                category: d.item_category,
+                status: d.is_active ? 'active' : 'inactive',
+                maxPrice: parseFloat(d.max_price_per_unit) || 0,
+                currency: d.currency || 'USD',
+                quantity: d.quantity || 0,
+                quantityUnit: d.quantity_unit || '',
+                requiredBy: d.required_by,
+                deliveryLocation: d.delivery_location,
+                searchRadius: d.search_radius || 50,
+                description: d.item_description || ''
+            })));
+        } catch (err) {
+            console.error('Failed to fetch demands:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        const newDemand = {
-            uuid: `DEM-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`,
-            name: formData.name,
-            category: formData.category,
-            status: 'pending',
-            maxPrice: parseFloat(formData.maxPrice),
-            currency: formData.currency,
-            quantity: parseFloat(formData.quantity),
-            quantityUnit: formData.quantityUnit,
-            requiredBy: formData.requiredBy,
-            deliveryLocation: formData.deliveryLocation,
-            description: formData.description,
-        };
-        setDemands([newDemand, ...demands]);
-        setFormData({
-            name: '', category: '', maxPrice: '', currency: 'USD',
-            quantity: '', quantityUnit: '', requiredBy: '', deliveryLocation: '', description: ''
-        });
+        setIsSubmitting(true);
+        try {
+            const payload = {
+                item_name: formData.name,
+                item_category: formData.category, // Send Name string
+                // category_id: null, // Let backend resolve it
+                item_description: formData.description,
+                max_price_per_unit: parseFloat(formData.maxPrice) || null,
+                currency: formData.currency,
+                quantity: parseFloat(formData.quantity) || null,
+                quantity_unit: formData.quantityUnit,
+                required_by: formData.requiredBy || null,
+                delivery_location: formData.deliveryLocation || null,
+                search_radius: parseFloat(formData.searchRadius) || 50,
+            };
+            await api.post('/demand', payload);
+            setFormData({
+                name: '', category: '', maxPrice: '', currency: 'USD',
+                quantity: '', quantityUnit: '', requiredBy: '',
+                deliveryLocation: '', searchRadius: 50, description: ''
+            });
+            fetchDemands(); // Refresh list
+        } catch (err) {
+            console.error('Failed to create demand:', err);
+            alert('Failed to create demand. Please try again.');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const getFilteredAndSortedDemands = () => {
         let filtered = demands.filter(demand => {
-            const matchesSearch = demand.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                                  demand.category.toLowerCase().includes(searchQuery.toLowerCase());
+            const matchesSearch = (demand.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                  (demand.category || '').toLowerCase().includes(searchQuery.toLowerCase());
             const matchesStatus = filterStatus === 'all' || demand.status === filterStatus;
             const matchesCategory = filterCategory === 'all' || demand.category === filterCategory;
             return matchesSearch && matchesStatus && matchesCategory;
         });
 
+        // Sort
         filtered.sort((a, b) => {
             if (sortBy === 'price') return b.maxPrice - a.maxPrice;
             if (sortBy === 'status') return a.status.localeCompare(b.status);
-            return 0;
+            return 0; // default 'date' keeps original order (newest first)
         });
 
         return filtered;
     };
 
     const uniqueCategories = [...new Set(demands.map(d => d.category))];
-
-    const handleFindMatches = (demand) => {
-        navigate(`/match-results?type=demand&id=${demand.uuid}`);
-    };
 
     return (
         <div className="demand-page-wrapper">
@@ -194,7 +196,13 @@ const Demand = () => {
                                     </div>
                                     <div className="detail-item">
                                         <span className="detail-label">Max Price</span>
-                                        <span className="detail-value">${demand.maxPrice.toFixed(2)}</span>
+                                        <span className="detail-value">
+                                            {{
+                                                'USD': '$', 'INR': '₹', 'EUR': '€', 'GBP': '£',
+                                                'JPY': '¥', 'AUD': 'A$', 'CAD': 'C$'
+                                            }[demand.currency] || demand.currency}
+                                            {(Number(demand.maxPrice) || 0).toFixed(2)}
+                                        </span>
                                     </div>
                                     <div className="detail-item">
                                         <span className="detail-label">Quantity</span>
@@ -203,11 +211,25 @@ const Demand = () => {
                                 </div>
 
                                 <div className="demand-card-actions">
-                                    <button className="demand-action-btn find-matches-btn" onClick={() => handleFindMatches(demand)}>
+                                    <button
+                                        className="demand-action-btn find-matches-btn"
+                                        onClick={() => navigate(`/demand/${demand.demandId}/match-map`)}
+                                    >
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                                         Find Matching Supplies
                                     </button>
-                                    <button className="demand-action-btn delete-btn" onClick={() => setDemands(prev => prev.filter(d => d.uuid !== demand.uuid))}>
+                                    <button
+                                        className="demand-action-btn delete-btn"
+                                        onClick={async () => {
+                                            if(!window.confirm('Are you sure you want to delete this demand?')) return;
+                                            try {
+                                                await api.delete(`/demand/${demand.demandId}`);
+                                                fetchDemands();
+                                            } catch (err) {
+                                                console.error('Failed to delete demand:', err);
+                                            }
+                                        }}
+                                    >
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                         Delete
                                     </button>
@@ -227,18 +249,46 @@ const Demand = () => {
                         <div className="form-scroll-content">
                             <div className="input-group">
                                 <label className="input-label">Item Name</label>
-                                <input type="text" name="name" placeholder="e.g. Emergency Response Kits" className="styled-input" value={formData.name} onChange={handleInputChange} required />
+                                <input
+                                    type="text"
+                                    name="name"
+                                    placeholder="e.g. Emergency Response Kits"
+                                    className="styled-input"
+                                    value={formData.name}
+                                    onChange={handleInputChange}
+                                    required
+                                />
                             </div>
 
                             <div className="input-group">
                                 <label className="input-label">Item Category</label>
-                                <input type="text" name="category" placeholder="e.g. Healthcare" className="styled-input" value={formData.category} onChange={handleInputChange} required />
+                                <select
+                                    name="category"
+                                    className="styled-input"
+                                    value={formData.category}
+                                    onChange={handleInputChange}
+                                    required
+                                >
+                                    <option value="" disabled>Select a category...</option>
+                                    {categories.map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
+                                    ))}
+                                </select>
                             </div>
 
                             <div className="input-row">
                                 <div className="input-group">
                                     <label className="input-label">Max Price per Unit</label>
-                                    <input type="number" name="maxPrice" step="0.01" placeholder="0.00" className="styled-input" value={formData.maxPrice} onChange={handleInputChange} required />
+                                    <input
+                                        type="number"
+                                        name="maxPrice"
+                                        step="0.01"
+                                        placeholder="0.00"
+                                        className="styled-input"
+                                        value={formData.maxPrice}
+                                        onChange={handleInputChange}
+                                        required
+                                    />
                                 </div>
                                 <div className="input-group">
                                     <label className="input-label">Currency</label>
@@ -257,7 +307,16 @@ const Demand = () => {
                             <div className="input-row">
                                 <div className="input-group">
                                     <label className="input-label">Quantity</label>
-                                    <input type="number" name="quantity" step="0.01" placeholder="0" className="styled-input" value={formData.quantity} onChange={handleInputChange} required />
+                                    <input
+                                        type="number"
+                                        name="quantity"
+                                        step="0.01"
+                                        placeholder="0"
+                                        className="styled-input"
+                                        value={formData.quantity}
+                                        onChange={handleInputChange}
+                                        required
+                                    />
                                 </div>
                                 <div className="input-group">
                                     <label className="input-label">Quantity Unit</label>
@@ -276,14 +335,58 @@ const Demand = () => {
                                 </div>
                             </div>
 
+                             <div className="input-group radius-input-group">
+                                <label className="input-label">
+                                    Search Radius
+                                    <span className="radius-value-badge">{formData.searchRadius} km</span>
+                                </label>
+                                <div className="radius-control">
+                                    <input
+                                        type="range"
+                                        name="searchRadius"
+                                        min="5"
+                                        max="500"
+                                        step="5"
+                                        className="radius-slider"
+                                        value={formData.searchRadius}
+                                        onChange={handleInputChange}
+                                    />
+                                    <input
+                                        type="number"
+                                        name="searchRadius"
+                                        min="5"
+                                        max="500"
+                                        className="styled-input radius-number"
+                                        value={formData.searchRadius}
+                                        onChange={handleInputChange}
+                                    />
+                                </div>
+                                <span className="radius-hint">How far to search for matching supplies</span>
+                            </div>
+
                             <div className="input-row">
                                 <div className="input-group">
                                     <label className="input-label">Required By Date</label>
-                                    <input type="date" name="requiredBy" className="styled-input" value={formData.requiredBy} onChange={handleInputChange} required />
+                                    <input
+                                        type="date"
+                                        name="requiredBy"
+                                        className="styled-input"
+                                        value={formData.requiredBy}
+                                        onChange={handleInputChange}
+                                        required
+                                    />
                                 </div>
                                 <div className="input-group">
                                     <label className="input-label">Delivery Location</label>
-                                    <input type="text" name="deliveryLocation" placeholder="e.g. Mumbai, India" className="styled-input" value={formData.deliveryLocation} onChange={handleInputChange} required />
+                                    <input
+                                        type="text"
+                                        name="deliveryLocation"
+                                        placeholder="e.g. Mumbai, India"
+                                        className="styled-input"
+                                        value={formData.deliveryLocation}
+                                        onChange={handleInputChange}
+                                        required
+                                    />
                                 </div>
                             </div>
 
@@ -293,9 +396,9 @@ const Demand = () => {
                             </div>
                         </div>
                         <div className="supply-btn-container">
-                            <button type="submit" className="submit-btn">
+                            <button type="submit" className="submit-btn" disabled={isSubmitting}>
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                                Register Demand
+                                {isSubmitting ? 'Creating...' : 'Register Demand'}
                             </button>
                         </div>
                     </form>

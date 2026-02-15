@@ -31,9 +31,12 @@ function FitBounds({ positions }) {
 
 
 const Map = () => {
-    const { supplyId } = useParams(); // dynamic route: /supply/:supplyId/match-map
+    const { supplyId, demandId } = useParams(); // supplyId or demandId will be present
+    const isDemandMode = !!demandId;
+    const isSupplyMode = !!supplyId;
+    const isMatchMode = isSupplyMode || isDemandMode;
 
-    // ── Static demo markers (when no supplyId) ──
+    // ── Static demo markers (when no ID) ──
     const staticMarkers = [
         {
             id: 1,
@@ -62,20 +65,24 @@ const Map = () => {
     const [currentStyle, setCurrentStyle] = useState('osm');
     const [zoomLevel, setZoomLevel] = useState(17);
 
-    // ── Match results state (when supplyId is present) ──
+    // ── Match results state ──
     const [searchData, setSearchData] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    // Fetch search results when supplyId is present
+    // Fetch search results when ID is present
     useEffect(() => {
-        if (!supplyId) return;
+        if (!isMatchMode) return;
 
         const fetchMatches = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                const data = await api.get(`/supply/${supplyId}/search`);
+                const endpoint = isDemandMode 
+                    ? `/demand/${demandId}/search`
+                    : `/supply/${supplyId}/search`;
+                
+                const data = await api.get(endpoint);
                 setSearchData(data);
             } catch (err) {
                 console.error('Failed to fetch match results:', err);
@@ -86,26 +93,27 @@ const Map = () => {
         };
 
         fetchMatches();
-    }, [supplyId]);
+    }, [supplyId, demandId, isDemandMode, isMatchMode]);
 
     // ── Build markers from search data ──
-    const isMatchMode = !!supplyId;
 
-    // Origin marker (the supply org)
-    const supplyOrgMarker = searchData ? {
+    // Origin marker
+    const originMarker = searchData ? {
         id: 'origin',
-        latlng: [searchData.supply_org_lat, searchData.supply_org_lng],
-        orgName: searchData.supply_org_name,
+        latlng: isDemandMode 
+            ? [searchData.demand_org_lat, searchData.demand_org_lng]
+            : [searchData.supply_org_lat, searchData.supply_org_lng],
+        orgName: isDemandMode ? searchData.demand_org_name : searchData.supply_org_name,
         orgMail: '',
         contactName: 'Your Organisation',
         contactNo: '',
-        itemName: `Supply #${searchData.supply_id}`,
-        itemCategory: 'Origin',
+        itemName: isDemandMode ? `Demand #${searchData.demand_id}` : `Supply #${searchData.supply_id}`,
+        itemCategory: isDemandMode ? 'DEMAND ORIGIN' : 'SUPPLY ORIGIN',
         itemPrice: null,
         isOrigin: true,
     } : null;
 
-    // Matched demand markers
+    // Match markers
     const matchMarkers = searchData
         ? searchData.results.map((r, idx) => ({
             id: `match-${r.id || idx}`,
@@ -127,19 +135,19 @@ const Map = () => {
         : [];
 
     const markers = isMatchMode
-        ? [supplyOrgMarker, ...matchMarkers].filter(Boolean)
+        ? [originMarker, ...matchMarkers].filter(Boolean)
         : staticMarkers;
 
-    const defaultCenter = isMatchMode && supplyOrgMarker
-        ? supplyOrgMarker.latlng
+    const defaultCenter = isMatchMode && originMarker
+        ? originMarker.latlng
         : [12.835230712705915, 77.69201222327615];
 
     // All marker positions for polylines and bounds
     const allPositions = markers.map(m => m.latlng);
 
     // Polylines: connect origin to each match
-    const polylinePositions = isMatchMode && supplyOrgMarker
-        ? matchMarkers.map(m => [supplyOrgMarker.latlng, m.latlng])
+    const polylinePositions = isMatchMode && originMarker
+        ? matchMarkers.map(m => [originMarker.latlng, m.latlng])
         : [markers.map(m => m.latlng)]; // static mode: chain
 
     return (
@@ -162,7 +170,7 @@ const Map = () => {
                         animation: 'spin 0.8s linear infinite',
                     }} />
                     <p style={{ marginTop: 16, color: '#2c3e50', fontWeight: 600 }}>
-                        Searching for matching demands...
+                        {isDemandMode ? 'Searching for matching supplies...' : 'Searching for matching demands...'}
                     </p>
                     <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
                 </div>
@@ -232,9 +240,9 @@ const Map = () => {
                 />
 
                 {/* Search radius circle around origin */}
-                {isMatchMode && supplyOrgMarker && searchData && (
+                {isMatchMode && originMarker && searchData && (
                     <Circle
-                        center={supplyOrgMarker.latlng}
+                        center={originMarker.latlng}
                         radius={searchData.search_radius_km * 1000}
                         pathOptions={{
                             color: '#2364AA',
@@ -267,7 +275,7 @@ const Map = () => {
                                         }}
                                     >
                                         <p className="item-name">{marker.itemName}</p>
-                                        <p className="item-category">SUPPLY ORIGIN</p>
+                                        <p className="item-category">{marker.itemCategory}</p>
                                     </div>
                                 </div>
                             ) : isMatchMode ? (
@@ -292,7 +300,14 @@ const Map = () => {
                                         <p className="item-name">{marker.itemName}</p>
                                         <p className="item-category">{marker.itemCategory}</p>
                                         {marker.itemPrice != null && (
-                                            <p className="item-price">Max ₹{marker.itemPrice}/unit</p>
+                                            <p className="item-price">
+                                                {isDemandMode ? `Price: ₹${marker.itemPrice}/unit` : `Max: ₹${marker.itemPrice}/unit`}
+                                            </p>
+                                        )}
+                                        {marker.quantity && (
+                                             <p style={{fontSize: 12, marginBottom: 0}}>
+                                                Qty: {marker.quantity} {marker.quantity_unit}
+                                             </p>
                                         )}
                                     </div>
                                     <div style={{

@@ -1,100 +1,65 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../../utils/api';
 import './Requests.css';
 
 const Requests = () => {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('received');
-
-    const [sentRequests, setSentRequests] = useState([
-        {
-            id: 'REQ-S001',
-            type: 'demand',
-            itemName: 'Emergency Medical Kits',
-            matchScore: 92,
-            toOrg: 'Global Aid Foundation',
-            status: 'pending',
-            sentAt: '2024-02-10T14:30:00Z',
-            message: 'We would like to initiate a business discussion for your medical kit supply.',
-        },
-        {
-            id: 'REQ-S002',
-            type: 'supply',
-            itemName: 'Portable Solar Panels',
-            matchScore: 78,
-            toOrg: 'SunPower Industries',
-            status: 'accepted',
-            sentAt: '2024-02-08T10:00:00Z',
-            message: 'Your solar panel supply matches our demand. Interested in discussing terms.',
-        },
-        {
-            id: 'REQ-S003',
-            type: 'demand',
-            itemName: 'Water Purifiers',
-            matchScore: 65,
-            toOrg: 'AquaFilter Corp',
-            status: 'rejected',
-            sentAt: '2024-02-05T16:45:00Z',
-            message: 'Looking for bulk water purifier supply for relief operations.',
-        },
-    ]);
-
-    const [receivedRequests, setReceivedRequests] = useState([
-        {
-            id: 'REQ-R001',
-            type: 'supply',
-            itemName: 'N95 Masks (Medical Grade)',
-            matchScore: 88,
-            fromOrg: 'Alpha Logistics',
-            status: 'pending',
-            sentAt: '2024-02-11T09:15:00Z',
-            message: 'We are interested in your N95 mask supply. Can we discuss pricing and logistics?',
-        },
-        {
-            id: 'REQ-R002',
-            type: 'demand',
-            itemName: 'Emergency Shelters',
-            matchScore: 55,
-            fromOrg: 'Eco Shelters',
-            status: 'pending',
-            sentAt: '2024-02-09T11:30:00Z',
-            message: 'Your shelter supply matches our requirements. Would like to open a business room.',
-        },
-        {
-            id: 'REQ-R003',
-            type: 'supply',
-            itemName: 'First Aid Supplies',
-            matchScore: 91,
-            fromOrg: 'MedSupply Co.',
-            status: 'accepted',
-            sentAt: '2024-02-07T08:00:00Z',
-            message: 'Excellent match on first aid supplies. Ready to negotiate.',
-        },
-    ]);
-
+    const [sentRequests, setSentRequests] = useState([]);
+    const [receivedRequests, setReceivedRequests] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
     const [rejectingId, setRejectingId] = useState(null);
     const [rejectionReason, setRejectionReason] = useState('');
 
-    const handleAccept = (id) => {
-        setReceivedRequests(prev =>
-            prev.map(r => r.id === id ? { ...r, status: 'accepted' } : r)
-        );
-        // Prompt 154: On Accept -> navigate to business room
-        setTimeout(() => {
-            navigate('/rooms');
-        }, 1000);
+    useEffect(() => {
+        fetchRequests();
+    }, []);
+
+    const fetchRequests = async () => {
+        setIsLoading(true);
+        try {
+            const data = await api.get('/requests');
+            setSentRequests(data.sent || []);
+            setReceivedRequests(data.received || []);
+        } catch (err) {
+            console.error('Failed to fetch requests:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleAccept = async (id) => {
+        try {
+            await api.patch(`/requests/${id}/accept`);
+            setReceivedRequests(prev =>
+                prev.map(r => r.request_id === id ? { ...r, status: 'accepted' } : r)
+            );
+            setTimeout(() => {
+                navigate('/rooms');
+            }, 1000);
+        } catch (err) {
+            console.error('Failed to accept request:', err);
+            alert('Failed to accept request.');
+        }
     };
 
     const handleRejectClick = (id) => {
         setRejectingId(id);
     };
 
-    const handleConfirmReject = (id) => {
-        setReceivedRequests(prev =>
-            prev.map(r => r.id === id ? { ...r, status: 'rejected', rejectionReason } : r)
-        );
-        setRejectingId(null);
-        setRejectionReason('');
+    const handleConfirmReject = async (id) => {
+        try {
+            await api.patch(`/requests/${id}/reject`, { rejection_reason: rejectionReason });
+            setReceivedRequests(prev =>
+                prev.map(r => r.request_id === id ? { ...r, status: 'rejected', rejection_reason: rejectionReason } : r)
+            );
+            setRejectingId(null);
+            setRejectionReason('');
+        } catch (err) {
+            console.error('Failed to reject request:', err);
+            alert('Failed to reject request.');
+        }
     };
 
     const handleCancelReject = () => {
@@ -146,31 +111,43 @@ const Requests = () => {
 
             {/* Request List */}
             <div className="requests-list">
-                {requests.length === 0 ? (
+                {isLoading ? (
+                    <div className="requests-empty">
+                        <p>Loading requests...</p>
+                    </div>
+                ) : requests.length === 0 ? (
                     <div className="requests-empty">
                         <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                         <p>No {activeTab} requests yet.</p>
                     </div>
                 ) : (
                     requests.map(request => (
-                        <div key={request.id} className={`request-card ${request.status}`}>
+                        <div key={request.request_id} className={`request-card ${request.status}`}>
                             <div className="request-card-top">
                                 <div className="request-info">
                                     <div className="request-meta-row">
-                                        <span className="request-type-tag">{request.type}</span>
-                                        <span className="request-id">{request.id}</span>
-                                        <span className="request-date">{formatDate(request.sentAt)}</span>
+                                        <span className="request-type-tag">
+                                            {request.supply_id ? 'supply' : 'demand'}
+                                        </span>
+                                        <span className="request-id">REQ-{request.request_id}</span>
+                                        <span className="request-date">{formatDate(request.created_at)}</span>
                                     </div>
-                                    <h3 className="request-item-name">{request.itemName}</h3>
+                                    <h3 className="request-item-name">
+                                        {request.supply_name_snapshot || request.demand_name_snapshot || 'Listing'}
+                                    </h3>
                                     <span className="request-org">
-                                        {activeTab === 'received' ? `From: ${request.fromOrg}` : `To: ${request.toOrg}`}
+                                        {activeTab === 'received'
+                                            ? `From: ${request.from_org_name}`
+                                            : `To: ${request.to_org_name}`}
                                     </span>
                                 </div>
                                 <div className="request-right">
-                                    <div className={`match-score-circle ${request.matchScore >= 80 ? 'high' : request.matchScore >= 60 ? 'medium' : 'low'}`}>
-                                        <span className="score-number">{request.matchScore}%</span>
-                                        <span className="score-label">Match</span>
-                                    </div>
+                                    {request.match_score && (
+                                        <div className={`match-score-circle ${request.match_score >= 80 ? 'high' : request.match_score >= 60 ? 'medium' : 'low'}`}>
+                                            <span className="score-number">{Math.round(request.match_score)}%</span>
+                                            <span className="score-label">Match</span>
+                                        </div>
+                                    )}
                                     <span className={`request-status-badge ${getStatusClass(request.status)}`}>
                                         {request.status}
                                     </span>
@@ -184,7 +161,7 @@ const Requests = () => {
                             <div className="request-actions">
                                 {activeTab === 'received' && request.status === 'pending' && (
                                     <div className="req-action-flow">
-                                        {rejectingId === request.id ? (
+                                        {rejectingId === request.request_id ? (
                                             <div className="reject-reason-box">
                                                 <textarea
                                                     className="reject-reason-input"
@@ -195,7 +172,7 @@ const Requests = () => {
                                                 <div className="reject-reason-btns">
                                                     <button 
                                                         className="confirm-reject-btn"
-                                                        onClick={() => handleConfirmReject(request.id)}
+                                                        onClick={() => handleConfirmReject(request.request_id)}
                                                         disabled={!rejectionReason.trim()}
                                                     >
                                                         Confirm Reject
@@ -207,11 +184,11 @@ const Requests = () => {
                                             </div>
                                         ) : (
                                             <>
-                                                <button className="req-action-btn accept-btn" onClick={() => handleAccept(request.id)}>
+                                                <button className="req-action-btn accept-btn" onClick={() => handleAccept(request.request_id)}>
                                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                                                     Accept
                                                 </button>
-                                                <button className="req-action-btn reject-btn" onClick={() => handleRejectClick(request.id)}>
+                                                <button className="req-action-btn reject-btn" onClick={() => handleRejectClick(request.request_id)}>
                                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                                                     Reject
                                                 </button>
@@ -228,8 +205,8 @@ const Requests = () => {
                                 {request.status === 'rejected' && (
                                     <div className="reject-note-display">
                                         <span className="request-rejected-note">This request has been declined.</span>
-                                        {request.rejectionReason && (
-                                            <p className="rejection-reason-text">Reason: {request.rejectionReason}</p>
+                                        {request.rejection_reason && (
+                                            <p className="rejection-reason-text">Reason: {request.rejection_reason}</p>
                                         )}
                                     </div>
                                 )}
