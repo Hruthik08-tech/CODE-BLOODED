@@ -2091,3 +2091,73 @@ SELECT `demand_id`,
     `created_at`
 FROM `org_demand`
 WHERE `demand_id` BETWEEN 1 AND 38;
+-- ================================================================
+--  MODULE 5 — SEED RATINGS FOR EXISTING SUPPLIES & DEMANDS
+--  Some items rated, some left as NULL (Not Rated) for demo variety
+-- ================================================================
+UPDATE `org_supply`
+SET `rating` = 4.5
+WHERE `supply_id` = 1;
+UPDATE `org_supply`
+SET `rating` = 3.0
+WHERE `supply_id` = 2;
+UPDATE `org_supply`
+SET `rating` = 5.0
+WHERE `supply_id` = 3;
+UPDATE `org_supply`
+SET `rating` = 4.0
+WHERE `supply_id` = 5;
+UPDATE `org_supply`
+SET `rating` = 3.5
+WHERE `supply_id` = 7;
+UPDATE `org_supply`
+SET `rating` = 4.5
+WHERE `supply_id` = 9;
+UPDATE `org_supply`
+SET `rating` = 2.0
+WHERE `supply_id` = 11;
+UPDATE `org_supply`
+SET `rating` = 4.0
+WHERE `supply_id` = 13;
+UPDATE `org_supply`
+SET `rating` = 5.0
+WHERE `supply_id` = 15;
+UPDATE `org_supply`
+SET `rating` = 3.5
+WHERE `supply_id` = 17;
+UPDATE `org_supply`
+SET `rating` = 4.5
+WHERE `supply_id` = 19;
+UPDATE `org_supply`
+SET `rating` = 4.0
+WHERE `supply_id` = 21;
+UPDATE `org_demand`
+SET `rating` = 4.0
+WHERE `demand_id` = 1;
+UPDATE `org_demand`
+SET `rating` = 3.5
+WHERE `demand_id` = 2;
+UPDATE `org_demand`
+SET `rating` = 5.0
+WHERE `demand_id` = 3;
+UPDATE `org_demand`
+SET `rating` = 4.5
+WHERE `demand_id` = 5;
+UPDATE `org_demand`
+SET `rating` = 3.0
+WHERE `demand_id` = 7;
+UPDATE `org_demand`
+SET `rating` = 4.0
+WHERE `demand_id` = 9;
+UPDATE `org_demand`
+SET `rating` = 2.5
+WHERE `demand_id` = 11;
+UPDATE `org_demand`
+SET `rating` = 4.5
+WHERE `demand_id` = 13;
+UPDATE `org_demand`
+SET `rating` = 5.0
+WHERE `demand_id` = 15;
+UPDATE `org_demand`
+SET `rating` = 3.5
+WHERE `demand_id` = 17;

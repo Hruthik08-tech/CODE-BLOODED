@@ -8,28 +8,29 @@ This worker does NOT:
 
 It ONLY:
   - Receives supply/demand data via HTTP from the Node.js server
-  - Computes match scores using semantic + fuzzy matching
-  - Returns scored results back to the server
+  - Computes match scores using semantic + fuzzy + token matching
+  - Returns scored results with personalized breakdowns back to the server
 
 Architecture:
   Frontend → nginx → Node.js Server → [Cache check] → Matching Worker
-                                                     ↓
-                                              Store in Cache
+                                                      ↓
+                                               Store in Cache
 """
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 from utils import (
     calculate_distance,
     calculate_hybrid_similarity,
-    calculate_match_score,
+    calculate_match_score_detailed,
+    tokenize,
+    calculate_token_overlap,
 )
 import os
-
 
 
 from config import get_settings
@@ -42,7 +43,7 @@ settings = get_settings()
 app = FastAPI(
     title="Matching Worker",
     description="Pure computation worker for supply-demand matching",
-    version="2.0.0",
+    version="3.0.0",
 )
 
 app.add_middleware(
@@ -55,7 +56,7 @@ app.add_middleware(
 
 
 # ═══════════════════════════════════════════════════════════════
-# Request/Response schemas (worker-specific, inline)
+# Request/Response schemas
 # ═══════════════════════════════════════════════════════════════
 
 class OrgData(BaseModel):
@@ -99,10 +100,6 @@ class DemandData(BaseModel):
 
 
 class MatchSupplyRequest(BaseModel):
-    """
-    Server sends: the supply, its org, and all candidate demands with their orgs.
-    Worker computes scores and returns ranked results.
-    """
     class Candidate(BaseModel):
         demand: DemandData
         org: OrgData
@@ -114,10 +111,6 @@ class MatchSupplyRequest(BaseModel):
 
 
 class MatchDemandRequest(BaseModel):
-    """
-    Server sends: the demand, its org, and all candidate supplies with their orgs.
-    Worker computes scores and returns ranked results.
-    """
     class Candidate(BaseModel):
         supply: SupplyData
         org: OrgData
@@ -128,20 +121,41 @@ class MatchDemandRequest(BaseModel):
     candidates: List[Candidate]
 
 
+class ScoreBreakdown(BaseModel):
+    """Detailed score breakdown for frontend display"""
+    similarity: float = 0.0
+    distance: float = 0.0
+    price: float = 0.0
+    quantity: float = 0.0
+
+
+class MatchLabels(BaseModel):
+    """Human-readable labels for match context"""
+    price: str = "unknown"
+    quantity: str = "unknown"
+    fulfillment_pct: Optional[float] = None
+
+
 class MatchResult(BaseModel):
-    """A single scored match result"""
-    id: int                   # supply_id or demand_id
+    """A single scored match result with personalized breakdown"""
+    id: int
     org_id: int
     org_name: str
     item_name: str
     item_category: Optional[str] = None
     item_description: Optional[str] = None
     price: Optional[float] = None
+    currency: Optional[str] = None
     quantity: Optional[float] = None
     quantity_unit: Optional[str] = None
     distance_km: float
     name_similarity: float
     match_score: float
+    # Personalized breakdown
+    score_breakdown: Optional[ScoreBreakdown] = None
+    match_labels: Optional[MatchLabels] = None
+    category_matched: bool = False
+    # Org contact details
     org_email: Optional[str] = None
     org_phone: Optional[str] = None
     org_address: Optional[str] = None
@@ -157,6 +171,59 @@ class MatchResponse(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Shared Matching Logic
+# ═══════════════════════════════════════════════════════════════
+
+def check_category_match(
+    cat_id_a: Optional[int],
+    cat_id_b: Optional[int],
+    cat_name_a: Optional[str],
+    cat_name_b: Optional[str],
+) -> bool:
+    """
+    Consistent category matching used in BOTH directions.
+    1. ID match (exact)
+    2. String exact match (case-insensitive)
+    3. Substring containment (e.g., "Grains" in "Grains & Flour")
+    """
+    # ID match
+    if cat_id_a is not None and cat_id_b is not None:
+        if cat_id_a == cat_id_b:
+            return True
+    
+    # String match
+    a = (cat_name_a or "").lower().strip()
+    b = (cat_name_b or "").lower().strip()
+    
+    if not a or not b:
+        return False
+    
+    # Exact string
+    if a == b:
+        return True
+    
+    # Substring containment
+    if a in b or b in a:
+        return True
+    
+    return False
+
+
+def build_rich_text(item_name: str, item_description: str = None, item_category: str = None) -> str:
+    """Build rich comparison text from item fields."""
+    parts = [item_name or ""]
+    if item_description:
+        parts.append(item_description)
+    if item_category:
+        parts.append(item_category)
+    return " ".join(parts).strip()
+
+
+# Minimum score to include in results (lower = more results)
+MIN_MATCH_SCORE = 0.25
+
+
+# ═══════════════════════════════════════════════════════════════
 # Endpoints
 # ═══════════════════════════════════════════════════════════════
 
@@ -164,7 +231,7 @@ class MatchResponse(BaseModel):
 async def root():
     return {
         "service": "Matching Worker",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "status": "running",
     }
 
@@ -178,14 +245,7 @@ async def health():
 async def match_supply_to_demands(request: MatchSupplyRequest):
     """
     Compute matches: Supply → Demands.
-
-    The Node.js server sends:
-    - The supply item + its org
-    - All candidate demands + their orgs (pre-fetched from DB)
-    - The search radius
-
-    This worker computes distance, name similarity, price match,
-    and overall score for each candidate.
+    Returns scored results with personalized breakdowns.
     """
     try:
         supply = request.supply
@@ -193,74 +253,76 @@ async def match_supply_to_demands(request: MatchSupplyRequest):
         search_radius = request.search_radius
         results = []
 
-        print(f"[Worker] Processing match request for Supply ID: {supply.supply_id}. Candidates: {len(request.candidates)}. Radius: {search_radius}")
+        print(f"[Worker] Processing Supply→Demands for Supply ID: {supply.supply_id}. "
+              f"Candidates: {len(request.candidates)}. Radius: {search_radius}km")
+
+        supply_text = build_rich_text(supply.item_name, supply.item_description, supply.item_category)
 
         for candidate in request.candidates:
             dem = candidate.demand
             org = candidate.org
 
             try:
-                # Calculate distance
+                # Distance
                 distance_km = calculate_distance(
                     supply_org.latitude, supply_org.longitude,
                     org.latitude, org.longitude
                 )
 
-                # Filter by search radius
                 if distance_km > search_radius:
-                    # print(f"[Worker] Skipping Demand ID {dem.demand_id} due to distance: {distance_km:.2f}km > {search_radius}km")
                     continue
 
-                # Category match: Strict ID match preferred, fallback to string match
-                cat_match = False
-                if supply.category_id is not None and dem.category_id is not None:
-                    cat_match = (supply.category_id == dem.category_id)
-                
-                # If IDs missing or not matching, try string fallback (e.g. "Grains" vs "Grains & Flour")
-                if not cat_match:
-                    supply_cat = (supply.item_category or "").lower()
-                    demand_cat = (dem.item_category or "").lower()
-                    if supply_cat and demand_cat:
-                        cat_match = supply_cat == demand_cat or supply_cat in demand_cat or demand_cat in supply_cat
+                # Category match (consistent logic)
+                cat_match = check_category_match(
+                    supply.category_id, dem.category_id,
+                    supply.item_category, dem.item_category
+                )
 
-                # Construct rich text for semantic search (Name + Desc + Category Name as fallback)
-                # We use the raw category string if available to give context
-                supply_text = f"{supply.item_name} {supply.item_description or ''} {supply.item_category or ''}".strip()
-                demand_text = f"{dem.item_name} {dem.item_description or ''} {dem.item_category or ''}".strip()
+                # Build rich text for similarity
+                demand_text = build_rich_text(dem.item_name, dem.item_description, dem.item_category)
 
-                # Name similarity using hybrid semantic + fuzzy
+                # Hybrid similarity
                 try:
-                     name_similarity = calculate_hybrid_similarity(
-                         supply_text,
-                         demand_text,
-                         use_semantic=settings.USE_SEMANTIC_SEARCH,
-                         semantic_weight=settings.SEMANTIC_WEIGHT,
-                         fuzzy_weight=settings.FUZZY_WEIGHT
-                     )
+                    name_similarity = calculate_hybrid_similarity(
+                        supply_text,
+                        demand_text,
+                        use_semantic=settings.USE_SEMANTIC_SEARCH,
+                        semantic_weight=settings.SEMANTIC_WEIGHT,
+                        fuzzy_weight=settings.FUZZY_WEIGHT
+                    )
                 except Exception as e:
-                     print(f"[Worker] Similarity calc failed: {e}")
-                     name_similarity = 0.0
+                    print(f"[Worker] Similarity calc failed: {e}")
+                    name_similarity = 0.0
 
-                # Skip if neither category nor name matches well
+                # Skip only if NEITHER category nor name matches
                 if not cat_match and name_similarity < settings.SIMILARITY_THRESHOLD:
-                    # print(f"[Worker] Skipping Demand ID {dem.demand_id} due to low similarity: {name_similarity:.2f} < {settings.SIMILARITY_THRESHOLD}")
                     continue
 
-                # Boost similarity if category matches
-                effective_sim = max(name_similarity, 0.9) if cat_match else name_similarity
+                # Category boost: moderate, not overwhelming
+                if cat_match:
+                    effective_sim = max(name_similarity, 0.65)
+                    # Additional boost proportional to name similarity
+                    effective_sim = min(1.0, effective_sim + 0.15)
+                else:
+                    effective_sim = name_similarity
 
-                # Overall match score with flexible price logic
-                match_score = calculate_match_score(
+                # Detailed match score with breakdown
+                score_detail = calculate_match_score_detailed(
                     distance_km=distance_km,
                     similarity_score=effective_sim,
                     supply_price=supply.price_per_unit,
                     demand_max_price=dem.max_price_per_unit,
                     max_distance=search_radius,
+                    supply_qty=supply.quantity,
+                    supply_unit=supply.quantity_unit,
+                    demand_qty=dem.quantity,
+                    demand_unit=dem.quantity_unit,
                     price_tolerance=settings.PRICE_TOLERANCE_PERCENT
                 )
-                
-                # Only return if the score is decent (e.g. > 0.4)
-                if match_score < 0.4:
+
+                match_score = score_detail["match_score"]
+
+                if match_score < MIN_MATCH_SCORE:
                     continue
 
                 results.append(MatchResult(
@@ -270,12 +332,16 @@ async def match_supply_to_demands(request: MatchSupplyRequest):
                     item_name=dem.item_name,
                     item_category=dem.item_category,
                     item_description=dem.item_description,
-                    price=dem.max_price_per_unit, # Return demand's max price as reference
+                    price=dem.max_price_per_unit,
+                    currency=dem.currency,
                     quantity=dem.quantity,
                     quantity_unit=dem.quantity_unit,
                     distance_km=round(distance_km, 2),
-                    name_similarity=round(effective_sim, 2), # Return raw sim
-                    match_score=round(match_score, 2),
+                    name_similarity=round(effective_sim, 3),
+                    match_score=round(match_score, 3),
+                    score_breakdown=ScoreBreakdown(**score_detail["breakdown"]),
+                    match_labels=MatchLabels(**score_detail["labels"]),
+                    category_matched=cat_match,
                     org_email=org.email,
                     org_phone=org.phone_number,
                     org_address=org.address,
@@ -286,7 +352,6 @@ async def match_supply_to_demands(request: MatchSupplyRequest):
                 print(f"[Worker] Skipping candidate due to error: {item_err}")
                 continue
 
-        # Sort by match score (descending), limit results
         results.sort(key=lambda x: x.match_score, reverse=True)
         results = results[:settings.MAX_RESULTS]
 
@@ -308,20 +373,18 @@ async def match_supply_to_demands(request: MatchSupplyRequest):
 async def match_demand_to_supplies(request: MatchDemandRequest):
     """
     Compute matches: Demand → Supplies.
-
-    The Node.js server sends:
-    - The demand item + its org
-    - All candidate supplies + their orgs (pre-fetched from DB)
-    - The search radius
-
-    This worker computes distance, name similarity, price match,
-    and overall score for each candidate.
+    Returns scored results with personalized breakdowns.
     """
     try:
         demand = request.demand
         demand_org = request.demand_org
         search_radius = request.search_radius
         results = []
+
+        print(f"[Worker] Processing Demand→Supplies for Demand ID: {demand.demand_id}. "
+              f"Candidates: {len(request.candidates)}. Radius: {search_radius}km")
+
+        demand_text = build_rich_text(demand.item_name, demand.item_description, demand.item_category)
 
         for candidate in request.candidates:
             sup = candidate.supply
@@ -336,42 +399,55 @@ async def match_demand_to_supplies(request: MatchDemandRequest):
                 if distance_km > search_radius:
                     continue
 
-                cat_match = False
-                if demand.category_id is not None and sup.category_id is not None:
-                    cat_match = (demand.category_id == sup.category_id)
-                
-                if not cat_match:
-                    demand_cat = (demand.item_category or "").lower()
-                    supply_cat = (sup.item_category or "").lower()
-                    cat_match = demand_cat == supply_cat and demand_cat != ""
-
-                # Construct rich text for semantic search
-                demand_text = f"{demand.item_name} {demand.item_description or ''} {demand.item_category or ''}".strip()
-                supply_text = f"{sup.item_name} {sup.item_description or ''} {sup.item_category or ''}".strip()
-
-                name_similarity = calculate_hybrid_similarity(
-                    demand_text,
-                    supply_text,
-                    use_semantic=settings.USE_SEMANTIC_SEARCH,
-                    semantic_weight=settings.SEMANTIC_WEIGHT,
-                    fuzzy_weight=settings.FUZZY_WEIGHT
+                # Category match (same consistent logic)
+                cat_match = check_category_match(
+                    demand.category_id, sup.category_id,
+                    demand.item_category, sup.item_category
                 )
+
+                # Build rich text
+                supply_text = build_rich_text(sup.item_name, sup.item_description, sup.item_category)
+
+                # Hybrid similarity
+                try:
+                    name_similarity = calculate_hybrid_similarity(
+                        demand_text,
+                        supply_text,
+                        use_semantic=settings.USE_SEMANTIC_SEARCH,
+                        semantic_weight=settings.SEMANTIC_WEIGHT,
+                        fuzzy_weight=settings.FUZZY_WEIGHT
+                    )
+                except Exception as e:
+                    print(f"[Worker] Similarity calc failed: {e}")
+                    name_similarity = 0.0
 
                 if not cat_match and name_similarity < settings.SIMILARITY_THRESHOLD:
                     continue
 
-                effective_sim = max(name_similarity, 0.9) if cat_match else name_similarity
+                # Category boost: moderate
+                if cat_match:
+                    effective_sim = max(name_similarity, 0.65)
+                    effective_sim = min(1.0, effective_sim + 0.15)
+                else:
+                    effective_sim = name_similarity
 
-                match_score = calculate_match_score(
+                # Detailed score
+                score_detail = calculate_match_score_detailed(
                     distance_km=distance_km,
                     similarity_score=effective_sim,
                     supply_price=sup.price_per_unit,
                     demand_max_price=demand.max_price_per_unit,
                     max_distance=search_radius,
+                    supply_qty=sup.quantity,
+                    supply_unit=sup.quantity_unit,
+                    demand_qty=demand.quantity,
+                    demand_unit=demand.quantity_unit,
                     price_tolerance=settings.PRICE_TOLERANCE_PERCENT
                 )
 
-                if match_score < 0.4:
+                match_score = score_detail["match_score"]
+
+                if match_score < MIN_MATCH_SCORE:
                     continue
 
                 results.append(MatchResult(
@@ -382,11 +458,15 @@ async def match_demand_to_supplies(request: MatchDemandRequest):
                     item_category=sup.item_category,
                     item_description=sup.item_description,
                     price=sup.price_per_unit,
+                    currency=sup.currency,
                     quantity=sup.quantity,
                     quantity_unit=sup.quantity_unit,
                     distance_km=round(distance_km, 2),
-                    name_similarity=round(effective_sim, 2),
-                    match_score=round(match_score, 2),
+                    name_similarity=round(effective_sim, 3),
+                    match_score=round(match_score, 3),
+                    score_breakdown=ScoreBreakdown(**score_detail["breakdown"]),
+                    match_labels=MatchLabels(**score_detail["labels"]),
+                    category_matched=cat_match,
                     org_email=org.email,
                     org_phone=org.phone_number,
                     org_address=org.address,

@@ -101,12 +101,12 @@ const Dashboard = () => {
                     <h3 className="card-title">Recent Activity</h3>
                     <div className="activity-list">
                         {recentActivity && recentActivity.length > 0 ? (
-                            recentActivity.map(item => (
+                            recentActivity.slice(0, 5).map(item => (
                                 <div key={item.id} className="activity-item">
                                     <div className={`activity-dot dot-${item.type}`} />
                                     <div className="activity-content">
                                         <span className="activity-title">{item.title}</span>
-                                        <span className="activity-desc">{item.desc}</span>
+                                        <span className="activity-desc" dangerouslySetInnerHTML={{ __html: item.desc }} />
                                     </div>
                                     <span className="activity-time">{timeAgo(item.time)}</span>
                                 </div>

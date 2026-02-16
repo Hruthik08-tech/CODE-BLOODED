@@ -14,13 +14,13 @@ class Settings(BaseSettings):
 
     # Matching Algorithm
     DEFAULT_SEARCH_RADIUS_KM: float = 50.0
-    MAX_RESULTS: int = 20
+    MAX_RESULTS: int = 30
     
-    # Lowered threshold for more flexibility
-    SIMILARITY_THRESHOLD: float = 0.25 
+    # Lower threshold for more flexible matching
+    SIMILARITY_THRESHOLD: float = 0.20 
     
-    # Price flexibility (allow 15% over max price)
-    PRICE_TOLERANCE_PERCENT: float = 0.15
+    # Price flexibility (allow 25% over max price for visibility)
+    PRICE_TOLERANCE_PERCENT: float = 0.25
 
     # Semantic Search
     # Semantic Search Provider

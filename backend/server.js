@@ -16,6 +16,7 @@ const roomsRoutes = require('./routes/rooms');
 const dealsRoutes = require('./routes/deals');
 const notificationsRoutes = require('./routes/notifications');
 const matchesRoutes = require('./routes/matches');
+const organisationsRoutes = require('./routes/organisations');
 const authenticateToken = require('./middleware/authenticateToken');
 
 const app = express();
@@ -53,6 +54,7 @@ app.use('/api/rooms', roomsRoutes);
 app.use('/api/deals', dealsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/matches', matchesRoutes);
+app.use('/api/organisations', organisationsRoutes);
 
 // 404 fallback
 app.use((_req, res) => {

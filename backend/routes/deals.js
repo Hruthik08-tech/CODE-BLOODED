@@ -39,6 +39,83 @@ router.get('/', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// GET /api/deals/map/partners — Get deal partners with locations
+// Used by the default Map view to show the org network
+// ═══════════════════════════════════════════════════════════════
+router.get('/map/partners', async (req, res) => {
+  try {
+    const orgId = req.user.org_id;
+
+    // Fetch all deals (active or completed) with partner org locations
+    const [rows] = await pool.query(
+      `SELECT d.deal_id, d.deal_status,
+              d.supply_name_snapshot, d.demand_name_snapshot,
+              d.agreed_price, d.quantity, d.currency,
+              d.supply_org_id, d.demand_org_id,
+              d.created_at,
+              o_partner.org_id AS partner_org_id,
+              o_partner.org_name AS partner_org_name,
+              o_partner.email AS partner_email,
+              o_partner.phone_number AS partner_phone,
+              o_partner.address AS partner_address,
+              o_partner.city AS partner_city,
+              o_partner.state AS partner_state,
+              o_partner.latitude AS partner_lat,
+              o_partner.longitude AS partner_lng,
+              o_partner.description AS partner_description,
+              o_partner.website_url AS partner_website
+       FROM deal d
+       JOIN organisation o_partner 
+         ON o_partner.org_id = IF(d.supply_org_id = ?, d.demand_org_id, d.supply_org_id)
+       WHERE (d.supply_org_id = ? OR d.demand_org_id = ?)
+         AND d.deal_status IN ('active', 'completed', 'in_progress', 'pending')
+       ORDER BY d.created_at DESC`,
+      [orgId, orgId, orgId]
+    );
+
+    // Deduplicate by partner org (keep all deals per partner)
+    const partnerMap = {};
+    for (const row of rows) {
+      const pid = row.partner_org_id;
+      if (!partnerMap[pid]) {
+        partnerMap[pid] = {
+          org_id: pid,
+          org_name: row.partner_org_name,
+          email: row.partner_email,
+          phone: row.partner_phone,
+          address: row.partner_address,
+          city: row.partner_city,
+          state: row.partner_state,
+          latitude: row.partner_lat,
+          longitude: row.partner_lng,
+          description: row.partner_description,
+          website_url: row.partner_website,
+          deals: [],
+        };
+      }
+      partnerMap[pid].deals.push({
+        deal_id: row.deal_id,
+        deal_status: row.deal_status,
+        supply_name: row.supply_name_snapshot,
+        demand_name: row.demand_name_snapshot,
+        agreed_price: row.agreed_price,
+        quantity: row.quantity,
+        currency: row.currency,
+        created_at: row.created_at,
+      });
+    }
+
+    res.json({
+      total_partners: Object.keys(partnerMap).length,
+      partners: Object.values(partnerMap),
+    });
+  } catch (err) {
+    console.error('[Deals] Map partners error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
 // GET /api/deals/:id — Get deal details + QR data (FR-29)
 // ═══════════════════════════════════════════════════════════════
 router.get('/:id', async (req, res) => {

@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1
-# ──────────────────────────────────────────────────────────────
-#  GENYSIS  —  Matching Worker (Python) Dockerfile
-#  (Lightweight Version)
-# ──────────────────────────────────────────────────────────────
+
+#  GENYSIS  —  Matching Worker
 FROM python:3.10-slim
 
 # Install system dependencies for build

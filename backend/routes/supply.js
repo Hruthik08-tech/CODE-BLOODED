@@ -1,10 +1,56 @@
+
 const express = require('express');
 const router = express.Router();
 const pool = require('../connections/db');
 const { redisClient } = require('../connections/redis');
 
-const CACHE_TTL_SECONDS = 3600; // 1 hour
+const CACHE_TTL_SECONDS = 900; // 15 minutes (was 1 hour — too stale for dynamic marketplace)
 const WORKER_URL = process.env.MATCHING_WORKER_URL || 'http://matching-worker:8000';
+
+// ═══════════════════════════════════════════════════════════════
+// Cache Invalidation Helper — clears ALL demand search caches
+// Called when supplies change so demand searches reflect new data
+// ═══════════════════════════════════════════════════════════════
+async function invalidateAllDemandCaches() {
+  try {
+    // Use SCAN to find all demand search keys safely (no KEYS in production)
+    let cursor = '0';
+    const keysToDelete = [];
+    do {
+      const result = await redisClient.scan(cursor, { MATCH: 'search:demand:*', COUNT: 100 });
+      cursor = result.cursor?.toString?.() || result[0]?.toString?.() || '0';
+      const keys = result.keys || result[1] || [];
+      keysToDelete.push(...keys);
+    } while (cursor !== '0');
+
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+      console.log(`[Cache] Invalidated ${keysToDelete.length} demand search caches`);
+    }
+  } catch (err) {
+    console.error('[Cache] Cross-invalidation error:', err.message);
+  }
+}
+
+async function invalidateAllSupplyCaches() {
+  try {
+    let cursor = '0';
+    const keysToDelete = [];
+    do {
+      const result = await redisClient.scan(cursor, { MATCH: 'search:supply:*', COUNT: 100 });
+      cursor = result.cursor?.toString?.() || result[0]?.toString?.() || '0';
+      const keys = result.keys || result[1] || [];
+      keysToDelete.push(...keys);
+    } while (cursor !== '0');
+
+    if (keysToDelete.length > 0) {
+      await redisClient.del(keysToDelete);
+      console.log(`[Cache] Invalidated ${keysToDelete.length} supply search caches`);
+    }
+  } catch (err) {
+    console.error('[Cache] Cross-invalidation error:', err.message);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // POST /api/supply — Create a new supply
@@ -14,8 +60,8 @@ router.post('/', async (req, res) => {
     const orgId = req.user.org_id;
     const {
       item_name,
-      item_category,   // category_name text from frontend
-      category_id,     // or direct category_id
+      item_category,
+      category_id,
       item_description,
       price_per_unit,
       currency,
@@ -57,7 +103,6 @@ router.post('/', async (req, res) => {
     }
     // Default to category 1 if nothing resolves
     if (!resolvedCategoryId) {
-       // Ensure default category exists
        try {
           await pool.query(`INSERT IGNORE INTO item_category (category_id, category_name, slug) VALUES (1, 'Uncategorized', 'uncategorized')`);
        } catch (ign) {}
@@ -84,10 +129,13 @@ router.post('/', async (req, res) => {
         search_radius || 50,
         expiry_date || null,
         supplier_name || null,
-        supplier_contact || null,  // frontend sends supplier_contact → DB column supplier_phone
+        supplier_contact || null,
         supplier_email || null,
       ]
     );
+
+    // Cross-invalidate: new supply means existing demand search caches are stale
+    invalidateAllDemandCaches().catch(() => {});
 
     res.status(201).json({
       message: 'Supply created successfully.',
@@ -95,6 +143,39 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[Supply] Create error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PUT /api/supply/:id/rate — Rate a supply (1-5 stars)
+// MUST be defined BEFORE PUT /:id to avoid Express route conflict
+// ═══════════════════════════════════════════════════════════════
+router.put('/:id/rate', async (req, res) => {
+  try {
+    const supplyId = req.params.id;
+    const { rating } = req.body;
+
+    if (rating === undefined || rating === null) {
+      return res.status(400).json({ error: 'rating is required (1-5).' });
+    }
+
+    const numRating = parseFloat(rating);
+    if (isNaN(numRating) || numRating < 1 || numRating > 5) {
+      return res.status(400).json({ error: 'rating must be between 1 and 5.' });
+    }
+
+    // Round to nearest 0.5
+    const roundedRating = Math.round(numRating * 2) / 2;
+
+    await pool.query(
+      `UPDATE org_supply SET rating = ?, updated_at = NOW() WHERE supply_id = ? AND deleted_at IS NULL`,
+      [roundedRating, supplyId]
+    );
+
+    res.json({ message: 'Supply rated successfully.', supply_id: parseInt(supplyId), rating: roundedRating });
+  } catch (err) {
+    console.error('[Supply] Rate error:', err);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -160,9 +241,10 @@ router.put('/:id', async (req, res) => {
       values
     );
 
-    // FR-14: Auto-invalidate cache on update
+    // Cross-invalidate: supply changed → demand caches are stale too
     try {
       await redisClient.del(`search:supply:${supplyId}`);
+      invalidateAllDemandCaches().catch(() => {});
     } catch (cacheErr) {
       console.error('[Supply] Cache invalidation on update error:', cacheErr.message);
     }
@@ -186,7 +268,7 @@ router.get('/', async (req, res) => {
               s.quantity, s.quantity_unit, s.search_radius,
               s.expiry_date, s.supplier_name,
               s.supplier_phone AS supplier_contact,
-              s.supplier_email, s.is_active, s.created_at
+              s.supplier_email, s.is_active, s.rating, s.created_at
        FROM org_supply s
        LEFT JOIN item_category c ON c.category_id = s.category_id
        WHERE s.org_id = ? AND s.deleted_at IS NULL
@@ -205,7 +287,6 @@ router.get('/', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 router.get('/:id', async (req, res) => {
   try {
-    // Prevent matching '/:id/search' or '/:id/cache' from matching here
     if (req.params.id === 'search' || req.params.id === 'cache') return;
 
     const [rows] = await pool.query(
@@ -236,9 +317,10 @@ router.delete('/:id', async (req, res) => {
       [req.params.id, req.user.org_id]
     );
 
-    // FR-14: Auto-invalidate cache on delete
+    // Cross-invalidate: deleted supply → demand caches are stale
     try {
       await redisClient.del(`search:supply:${req.params.id}`);
+      invalidateAllDemandCaches().catch(() => {});
     } catch (cacheErr) {
       console.error('[Supply] Cache invalidation on delete error:', cacheErr.message);
     }
@@ -252,17 +334,6 @@ router.delete('/:id', async (req, res) => {
 
 // ═══════════════════════════════════════════════════════════════
 // GET /api/supply/:id/search — Search for matching demands
-//
-//   Architecture (from diagram):
-//   1. Frontend requests search
-//   2. Server checks Redis cache   → if hit, return cached
-//   3. Server queries Database     → fetches supply + candidates
-//   4. Server sends to Worker      → worker computes match scores
-//   5. Server stores in cache      → TTL 1 hour
-//   6. Server returns results      → to frontend
-//
-//   Use ?force=true to bypass cache.
-//   The search_radius on the supply controls the geo-filter.
 // ═══════════════════════════════════════════════════════════════
 router.get('/:id/search', async (req, res) => {
   try {
@@ -396,6 +467,12 @@ router.get('/:id/search', async (req, res) => {
       supply_org_name: supply.org_name,
       supply_org_lat: supply.org_lat,
       supply_org_lng: supply.org_lng,
+      supply_item_name: supply.item_name,
+      supply_item_category: supply.item_category,
+      supply_price: supply.price_per_unit,
+      supply_currency: supply.currency,
+      supply_quantity: supply.quantity,
+      supply_quantity_unit: supply.quantity_unit,
       total_results: workerData.total_results,
       search_radius_km: searchRadius,
       cached: false,

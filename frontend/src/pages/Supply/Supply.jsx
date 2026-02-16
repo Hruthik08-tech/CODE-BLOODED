@@ -3,6 +3,64 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../utils/api';
 import './Supply.css';
 
+// ─── Star Rating Component ───────────────────────────────
+const StarRating = ({ rating, onRate, size = 18 }) => {
+    const [hovered, setHovered] = useState(0);
+
+    const renderStar = (index) => {
+        const filled = hovered > 0 ? index <= hovered : index <= (rating || 0);
+        return (
+            <svg
+                key={index}
+                xmlns="http://www.w3.org/2000/svg"
+                width={size}
+                height={size}
+                viewBox="0 0 24 24"
+                fill={filled ? '#f59e0b' : 'none'}
+                stroke={filled ? '#f59e0b' : '#cbd5e1'}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="rating-star"
+                style={{ cursor: onRate ? 'pointer' : 'default', transition: 'all 0.15s ease' }}
+                onMouseEnter={() => onRate && setHovered(index)}
+                onMouseLeave={() => onRate && setHovered(0)}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onRate && onRate(index);
+                }}
+            >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+        );
+    };
+
+    return (
+        <div className="star-rating-container">
+            <div className="star-rating-stars">
+                {[1, 2, 3, 4, 5].map(i => renderStar(i))}
+            </div>
+            {rating != null && (
+                <span className="star-rating-value">{Number(rating).toFixed(1)}</span>
+            )}
+        </div>
+    );
+};
+
+const RatingBadge = ({ rating, onRate }) => {
+    if (rating == null) {
+        return (
+            <div className="rating-badge not-rated">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+                <span>Not Rated</span>
+            </div>
+        );
+    }
+    return <StarRating rating={rating} onRate={onRate} size={16} />;
+};
+
 const Supply = () => {
     const navigate = useNavigate();
     const [supplies, setSupplies] = useState([]);
@@ -14,7 +72,7 @@ const Supply = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
     const [filterCategory, setFilterCategory] = useState('all');
-    const [sortBy, setSortBy] = useState('date'); // date, price, status
+    const [sortBy, setSortBy] = useState('date'); // date, price, status, rating
     const [supplierExpanded, setSupplierExpanded] = useState(false);
 
     const [formData, setFormData] = useState({
@@ -64,12 +122,25 @@ const Supply = () => {
                 quantity: s.quantity || 0,
                 quantityUnit: s.quantity_unit || '',
                 searchRadius: s.search_radius || 50,
-                description: s.item_description || ''
+                description: s.item_description || '',
+                rating: s.rating != null ? parseFloat(s.rating) : null
             })));
         } catch (err) {
             console.error('Failed to fetch supplies:', err);
         } finally {
             setIsLoadingSupplies(false);
+        }
+    };
+
+    const handleRateSupply = async (supplyId, newRating) => {
+        try {
+            await api.put(`/supply/${supplyId}/rate`, { rating: newRating });
+            // Update local state immediately for responsive UX
+            setSupplies(prev => prev.map(s => 
+                s.supplyId === supplyId ? { ...s, rating: newRating } : s
+            ));
+        } catch (err) {
+            console.error('Failed to rate supply:', err);
         }
     };
 
@@ -131,6 +202,12 @@ const Supply = () => {
                 return b.price - a.price;
             } else if (sortBy === 'status') {
                 return a.status.localeCompare(b.status);
+            } else if (sortBy === 'rating') {
+                // Items with ratings come first, then by rating value desc
+                if (a.rating == null && b.rating == null) return 0;
+                if (a.rating == null) return 1;
+                if (b.rating == null) return -1;
+                return b.rating - a.rating;
             }
             return 0; // default 'date' keeps original order (newest first)
         });
@@ -197,6 +274,7 @@ const Supply = () => {
                                 <option value="date">Sort by Date</option>
                                 <option value="price">Sort by Price</option>
                                 <option value="status">Sort by Status</option>
+                                <option value="rating">Sort by Rating</option>
                             </select>
                         </div>
                     </div>
@@ -212,6 +290,14 @@ const Supply = () => {
                                     <div className={`item-status-pill status-${supply.status}`}>
                                         {supply.status}
                                     </div>
+                                </div>
+
+                                {/* Rating Section */}
+                                <div className="item-rating-section">
+                                    <RatingBadge 
+                                        rating={supply.rating} 
+                                        onRate={(newRating) => handleRateSupply(supply.supplyId, newRating)} 
+                                    />
                                 </div>
 
                                 <div className="item-details-grid">

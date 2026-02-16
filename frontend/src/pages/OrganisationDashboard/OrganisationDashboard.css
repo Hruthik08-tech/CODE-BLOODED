@@ -304,6 +304,7 @@
     overflow-wrap: break-word;
     height: calc(100vh - 360px); /* Fixed height to allow internal scroll */
     overflow: hidden;
+    height: 550px;
 }
 
 .scrollable-details-content {

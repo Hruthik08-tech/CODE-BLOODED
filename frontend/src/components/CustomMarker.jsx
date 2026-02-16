@@ -12,13 +12,14 @@ L.Icon.Default.mergeOptions({
 });
 
 // Assuming lat and long position 
-const CustomMarker = ({position, children}) => {
+const CustomMarker = ({position, children, icon}) => {
     return (
-        <Marker position={position}>
+        <Marker position={position} icon={icon || new L.Icon.Default()}>
             {children}
         </Marker>
     )
 }
 
 export default CustomMarker;
+
 

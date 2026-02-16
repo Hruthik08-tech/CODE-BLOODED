@@ -108,7 +108,7 @@ const NotificationBell = () => {
                                 </div>
                                 <div className="notif-content">
                                     <span className="notif-title">{notif.title}</span>
-                                    <span className="notif-message">{notif.message}</span>
+                                    <span className="notif-message" dangerouslySetInnerHTML={{ __html: notif.message }} />
                                     <span className="notif-time">{notif.time}</span>
                                 </div>
                                 {!notif.read && <span className="notif-unread-dot" />}
